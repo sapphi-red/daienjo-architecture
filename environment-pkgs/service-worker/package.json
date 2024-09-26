@@ -1,0 +1,22 @@
+{
+  "name": "vite-env-service-worker",
+  "type": "module",
+  "private": true,
+  "version": "0.0.0",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsup",
+    "build:watch": "tsup --watch"
+  },
+  "peerDependencies": {
+    "vite": "^6.0.0-alpha.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.12",
+    "tsup": "^8.3.0"
+  },
+  "dependencies": {
+    "raw-body": "^3.0.0",
+    "ws": "^8.18.0"
+  }
+}

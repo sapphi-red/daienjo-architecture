@@ -1,0 +1,22 @@
+{
+  "name": "vite-env-workerd",
+  "type": "module",
+  "private": true,
+  "version": "0.0.0",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsup",
+    "build:watch": "tsup --watch"
+  },
+  "dependencies": {
+    "miniflare": "^3.20240925.0",
+    "wrangler": "^3.78.10"
+  },
+  "peerDependencies": {
+    "vite": "^6.0.0-alpha.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240925.0",
+    "tsup": "^8.3.0"
+  }
+}

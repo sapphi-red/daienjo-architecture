@@ -1,0 +1,22 @@
+import { env } from 'hono/adapter'
+import { Hono } from 'hono'
+
+type Env = {
+  UPSTREAM_HOSTNAME: string
+  UPSTREAM_PORT: string
+}
+
+const app = new Hono()
+
+// inject vite client manually for now
+app.get('/', async (c) => {
+  const url = new URL(c.req.url)
+  const { UPSTREAM_HOSTNAME, UPSTREAM_PORT } = env<Env>(c)
+  url.hostname = UPSTREAM_HOSTNAME
+  url.port = UPSTREAM_PORT
+  let html = await (await fetch(url)).text()
+  html = html.replace(/(<!-- body -->)/, '<h1>Hello from edge server 🔥</h1>$1')
+  return c.html(html)
+})
+
+export default app
