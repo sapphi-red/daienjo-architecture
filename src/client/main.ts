@@ -1,8 +1,14 @@
 import serviceWorkerPath from 'framework:serviceworker'
 
+const absoluteServiceWorkerPath = new URL(serviceWorkerPath, import.meta.url)
+  .href
+
 function register() {
   return navigator.serviceWorker
-    .register(serviceWorkerPath, { type: 'module', updateViaCache: 'none' })
+    .register(absoluteServiceWorkerPath, {
+      type: 'module',
+      updateViaCache: 'none',
+    })
     .then(
       function (registration) {
         console.log('Register Service Worker: Success')
@@ -21,7 +27,7 @@ function start() {
       return Promise.all(
         registrations.map((registration) =>
           import.meta.env.PROD &&
-          registration.active?.scriptURL === serviceWorkerPath
+          registration.active?.scriptURL === absoluteServiceWorkerPath
             ? null
             : registration.unregister(),
         ),
