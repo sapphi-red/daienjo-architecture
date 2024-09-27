@@ -66,7 +66,7 @@ export function serviceWorkerPlugin(
 
       const replacedCode = code.replaceAll(
         serviceWorkerPathPlaceholder,
-        JSON.stringify(filename!),
+        JSON.stringify('/' + filename!),
       )
 
       return { code: replacedCode, map: null } // FIXME: sourcemap is incorrect
