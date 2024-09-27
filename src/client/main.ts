@@ -19,7 +19,12 @@ function start() {
     .then((registrations) => {
       console.log('Unregister Service Worker')
       return Promise.all(
-        registrations.map((registration) => registration.unregister()),
+        registrations.map((registration) =>
+          import.meta.env.PROD &&
+          registration.active?.scriptURL === serviceWorkerPath
+            ? null
+            : registration.unregister(),
+        ),
       )
     })
     .then(() => {
