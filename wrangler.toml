@@ -1,1 +1,4 @@
-compatibility_date = "2024-09-23"
+name = "daienjo-architecture-edge"
+main = "dist/edge-server/main.js"
+compatibility_date = "2024-09-25"
+assets = { directory = "./dist/client", binding = "ASSETS" }

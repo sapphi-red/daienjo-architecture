@@ -107,7 +107,7 @@ export default function frameworkPlugin(options: Options): Plugin {
                 'dist/client',
                 options.clientEntry,
               ),
-              path.resolve(builder.config.root, 'dist/client/index.html'),
+              path.resolve(builder.config.root, 'dist/origin-server/index.html'),
             )
           },
         },
@@ -141,6 +141,7 @@ export default function frameworkPlugin(options: Options): Plugin {
       }
 
       await edge.api.setEnvs({
+        UPSTREAM_PROTOCOL: 'http:',
         UPSTREAM_HOSTNAME: 'localhost',
         UPSTREAM_PORT: '' + originServerPort,
       })

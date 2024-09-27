@@ -2,16 +2,19 @@ import { env } from 'hono/adapter'
 import { Hono } from 'hono'
 
 type Env = {
-  UPSTREAM_HOSTNAME: string
-  UPSTREAM_PORT: string
+  Bindings: {
+    UPSTREAM_PROTOCOL: string
+    UPSTREAM_HOSTNAME: string
+    UPSTREAM_PORT: string
+  }
 }
 
-const app = new Hono()
+const app = new Hono<Env>()
 
-// inject vite client manually for now
 app.get('/', async (c) => {
   const url = new URL(c.req.url)
-  const { UPSTREAM_HOSTNAME, UPSTREAM_PORT } = env<Env>(c)
+  const { UPSTREAM_PROTOCOL, UPSTREAM_HOSTNAME, UPSTREAM_PORT } = env(c)
+  url.protocol = UPSTREAM_PROTOCOL
   url.hostname = UPSTREAM_HOSTNAME
   url.port = UPSTREAM_PORT
   let html = await (await fetch(url)).text()
