@@ -196,9 +196,9 @@ export function createServiceWorkerEnvironment(
       },
       rollupOptions: {
         output: {
-          entryFileNames: 'sw/[name]-[hash].js',
-          chunkFileNames: 'sw/[name]-[hash].js',
-          assetFileNames: 'sw/[name]-[hash].[ext]',
+          entryFileNames: '[name]-[hash].js',
+          chunkFileNames: 'assets/sw/[name]-[hash].js',
+          assetFileNames: 'assets/sw/[name]-[hash].[ext]',
         },
       },
     },

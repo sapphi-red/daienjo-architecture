@@ -2,3 +2,8 @@ name = "daienjo-architecture-edge"
 main = "dist/edge-server/main.js"
 compatibility_date = "2024-09-25"
 assets = { directory = "./dist/client", binding = "ASSETS" }
+
+[env.local.vars]
+UPSTREAM_PROTOCOL = "http:"
+UPSTREAM_HOSTNAME = "localhost"
+UPSTREAM_PORT = "3000"
