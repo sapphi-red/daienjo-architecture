@@ -22,6 +22,8 @@ export function serviceWorkerPlugin(
   const serviceWorkerDevEntryPath = '/__sw_entry.js'
   const serviceWorkerRpcPath = '/__sw_rpc'
 
+  let entrypointPath: string | undefined
+
   const getFilenamePromises: PromiseWithResolvers<void>[] = []
   let filename: string | undefined
 
@@ -35,6 +37,17 @@ export function serviceWorkerPlugin(
         },
       }
     },
+    configEnvironment(name, config) {
+      if (name !== environmentName) return
+
+      const input = config.build?.rollupOptions?.input
+      if (!input || typeof input !== 'string')
+        throw new Error('input is not string')
+      entrypointPath = input
+      config.build ??= {}
+      config.build.rollupOptions ??= {}
+      config.build.rollupOptions.input = { 'main': entryId }
+    },
     resolveId(id) {
       if (id === entryId) {
         return resolvedEntryId
@@ -42,6 +55,16 @@ export function serviceWorkerPlugin(
     },
     async load(id) {
       if (id !== resolvedEntryId) return
+
+      if (this.environment.name === environmentName) {
+        return `
+import handler from ${JSON.stringify(entrypointPath)}
+
+self.addEventListener('fetch', (event) => {
+  handler(event)
+})
+        `
+      }
 
       let value: string
       if (this.environment.mode === 'dev') {

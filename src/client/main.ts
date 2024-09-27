@@ -1,14 +1,8 @@
 import serviceWorkerPath from 'framework:serviceworker'
 
-const absoluteServiceWorkerPath = new URL(serviceWorkerPath, import.meta.url)
-  .href
-
 function register() {
   return navigator.serviceWorker
-    .register(absoluteServiceWorkerPath, {
-      type: 'module',
-      updateViaCache: 'none',
-    })
+    .register(serviceWorkerPath, { type: 'module', updateViaCache: 'none' })
     .then(
       function (registration) {
         console.log('Register Service Worker: Success')
@@ -19,25 +13,18 @@ function register() {
       },
     )
 }
-async function start() {
-  const registrations = await navigator.serviceWorker.getRegistrations()
-  console.log('Unregister Service Worker')
-
-  let exists = false
-  await Promise.all(
-    registrations.map((registration) => {
-      const matched =
-        import.meta.env.PROD &&
-        registration.active?.scriptURL === absoluteServiceWorkerPath
-      if (matched) {
-        exists = true
-      }
-      return matched ? null : registration.unregister()
-    }),
-  )
-  if (!exists) {
-    await register()
-  }
+function start() {
+  navigator.serviceWorker
+    .getRegistrations()
+    .then((registrations) => {
+      console.log('Unregister Service Worker')
+      return Promise.all(
+        registrations.map((registration) => registration.unregister()),
+      )
+    })
+    .then(() => {
+      return register()
+    })
 }
 start()
 
