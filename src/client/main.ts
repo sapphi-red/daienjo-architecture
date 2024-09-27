@@ -19,23 +19,25 @@ function register() {
       },
     )
 }
-function start() {
-  navigator.serviceWorker
-    .getRegistrations()
-    .then((registrations) => {
-      console.log('Unregister Service Worker')
-      return Promise.all(
-        registrations.map((registration) =>
-          import.meta.env.PROD &&
-          registration.active?.scriptURL === absoluteServiceWorkerPath
-            ? null
-            : registration.unregister(),
-        ),
-      )
-    })
-    .then(() => {
-      return register()
-    })
+async function start() {
+  const registrations = await navigator.serviceWorker.getRegistrations()
+  console.log('Unregister Service Worker')
+
+  let exists = false
+  await Promise.all(
+    registrations.map((registration) => {
+      const matched =
+        import.meta.env.PROD &&
+        registration.active?.scriptURL === absoluteServiceWorkerPath
+      if (matched) {
+        exists = true
+      }
+      return matched ? null : registration.unregister()
+    }),
+  )
+  if (!exists) {
+    await register()
+  }
 }
 start()
 
