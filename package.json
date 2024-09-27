@@ -4,6 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "postinstall": "pnpm --filter vite-env-* build",
     "dev": "vite",
     "build": "tsc && vite build --app",
     "preview": "vite preview",
