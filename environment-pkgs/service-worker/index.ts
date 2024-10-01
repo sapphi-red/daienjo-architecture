@@ -43,10 +43,12 @@ export function serviceWorkerPlugin(
       const input = config.build?.rollupOptions?.input
       if (!input || typeof input !== 'string')
         throw new Error('input is not string')
-      entrypointPath = input
+      entrypointPath = getEntrypointFromInput(
+        config.build?.rollupOptions?.input,
+      )
       config.build ??= {}
       config.build.rollupOptions ??= {}
-      config.build.rollupOptions.input = { 'main': entryId }
+      config.build.rollupOptions.input = { main: entryId }
     },
     resolveId(id) {
       if (id === entryId) {
@@ -109,13 +111,12 @@ self.addEventListener('fetch', (event) => {
       getFilenamePromises.length = 0
     },
     async configureServer(server) {
+      if (entrypointPath === undefined) throw new Error()
+
       const _dirname = path.dirname(fileURLToPath(import.meta.url))
       const devWorkerEntryCode = await fs.readFile(
         path.resolve(_dirname, './worker/index.js'),
         'utf-8',
-      )
-      const entrypoint = getEntrypointFromInput(
-        server.environments[environmentName].config.build.rollupOptions.input,
       )
       server.middlewares.use(async (req, res, next) => {
         if (req.url?.replace(/\?.*$/, '') === serviceWorkerDevEntryPath) {
@@ -124,7 +125,7 @@ self.addEventListener('fetch', (event) => {
             `const ROOT = ${JSON.stringify(server.config.root)};\n` +
               `const RPC_PATH = ${JSON.stringify(serviceWorkerRpcPath)};\n` +
               `const HMR_PORT = ${hmrPort};\n` +
-              `const ENTRYPOINT = ${JSON.stringify(entrypoint)};\n` +
+              `const ENTRYPOINT = ${JSON.stringify(entrypointPath)};\n` +
               devWorkerEntryCode,
           )
           return
