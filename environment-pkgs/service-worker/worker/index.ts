@@ -27,10 +27,10 @@ self.addEventListener('activate', () => {
   setHandler()
 })
 self.addEventListener('fetch', (event) => {
-  handler?.(event)
   if (event.request.mode === 'navigate') {
     event.waitUntil(setHandler())
   }
+  handler?.(event)
 })
 
 let ws: WebSocket | undefined

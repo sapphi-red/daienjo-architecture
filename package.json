@@ -18,13 +18,13 @@
     "@cloudflare/workers-types": "^4.20240925.0",
     "@types/node": "^22.7.2",
     "typescript": "^5.5.3",
-    "vite": "https://pkg.pr.new/vite@bad0ccc",
+    "vite": "6.0.0-beta.3",
     "vite-env-service-worker": "workspace:*",
     "vite-env-workerd": "workspace:*",
     "wrangler": "^3.78.10"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.1",
-    "hono": "^4.6.3"
+    "hono": "^4.6.4"
   }
 }

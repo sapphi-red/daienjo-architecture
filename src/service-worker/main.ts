@@ -16,7 +16,4 @@ app.get('/', async (c) => {
   }
 })
 
-export default handle(app, {
-  // FIXME: https://github.com/honojs/hono/pull/3200
-  fetch: globalThis.self.fetch.bind(globalThis.self),
-})
+export default handle(app)
