@@ -4,6 +4,8 @@ import {
   DevEnvironment as ViteDevEnvironment,
   BuildEnvironment,
   type EnvironmentOptions,
+  type FSWatcher,
+  type ViteDevServer,
 } from 'vite'
 import { HotChannel, HotPayload, ResolvedConfig, Plugin } from 'vite'
 import {
@@ -18,17 +20,6 @@ import {
   type MiniflareOptions,
   type WebSocket,
 } from 'miniflare'
-
-export type DevEnvironment = ViteDevEnvironment & {
-  api: {
-    getHandler: ({
-      entrypoint,
-    }: {
-      entrypoint: string
-    }) => Promise<(req: Request) => Response | Promise<Response>>
-    setEnvs(envs: Record<string, Json>): Promise<void>
-  }
-}
 
 export type CloudflareEnvironmentOptions = {
   config?: string
@@ -74,7 +65,7 @@ export function createCloudflareEnvironment(
     webCompatible: true,
     dev: {
       createEnvironment(name, config) {
-        return createCloudflareDevEnvironment(name, config, options)
+        return new CloudflareDevEnvironment(name, config, options)
       },
     },
     build: {
@@ -95,86 +86,122 @@ async function createCloudflareBuildEnvironment(
   return buildEnv
 }
 
-async function createCloudflareDevEnvironment(
-  name: string,
-  config: ResolvedConfig,
-  cloudflareOptions: CloudflareEnvironmentOptions,
-): Promise<DevEnvironment> {
-  const { bindings: bindingsFromToml, ...optionsFromToml } =
-    getOptionsFromWranglerConfig(cloudflareOptions.config!)
+export class CloudflareDevEnvironment extends ViteDevEnvironment {
+  private mfOptions: MiniflareOptions
+  private entrypointSet = false
+  private mf: Miniflare | undefined
+  public hot: HotChannel & {
+    setWebSocket: (ws: WebSocket) => void
+  }
 
-  let currentOptions: MiniflareOptions = {
-    modulesRoot: fileURLToPath(new URL('./', import.meta.url)),
-    modules: [
-      {
-        type: 'ESModule',
-        path: fileURLToPath(new URL('worker/index.js', import.meta.url)),
+  constructor(
+    name: string,
+    config: ResolvedConfig,
+    options: CloudflareEnvironmentOptions,
+  ) {
+    const { bindings: bindingsFromToml, ...optionsFromToml } =
+      getOptionsFromWranglerConfig(options.config!)
+
+    const mfOptions: MiniflareOptions = {
+      modulesRoot: fileURLToPath(new URL('./', import.meta.url)),
+      modules: [
+        {
+          type: 'ESModule',
+          path: fileURLToPath(new URL('worker/index.js', import.meta.url)),
+        },
+      ],
+      unsafeEvalBinding: 'UNSAFE_EVAL',
+      bindings: {
+        ...bindingsFromToml,
+        ROOT: config.root,
       },
-    ],
-    unsafeEvalBinding: 'UNSAFE_EVAL',
-    bindings: {
-      ...bindingsFromToml,
-      ROOT: config.root,
-    },
-    serviceBindings: {
-      __viteFetchModule: async (request) => {
-        const args = await request.json()
-        try {
-          const result: any = await devEnv.fetchModule(...(args as [any, any]))
-          return new MiniflareResponse(JSON.stringify(result))
-        } catch (error) {
-          console.error('[fetchModule]', args, error)
-          throw error
-        }
+      serviceBindings: {
+        __viteFetchModule: async (request) => {
+          const args = await request.json()
+          try {
+            const result: any = await this.fetchModule(...(args as [any, any]))
+            return new MiniflareResponse(JSON.stringify(result))
+          } catch (error) {
+            console.error('[fetchModule]', args, error)
+            throw error
+          }
+        },
       },
-    },
-    ...optionsFromToml,
-  }
-  const mf = new Miniflare(currentOptions)
+      ...optionsFromToml,
+    }
 
-  const resp = await mf.dispatchFetch('http:0.0.0.0/__init-module-runner', {
-    headers: {
-      upgrade: 'websocket',
-    },
-  })
-  if (!resp.ok) {
-    throw new Error('Error: failed to initialize the module runner!')
+    const hot = createHotChannel()
+    super(name, config, { hot })
+
+    this.mfOptions = mfOptions
+    this.hot = hot
   }
 
-  const webSocket = resp.webSocket
-
-  if (!webSocket) {
-    console.error(
-      '\x1b[33m⚠️ failed to create a websocket for HMR (hmr disabled)\x1b[0m',
-    )
+  async init(options?: {
+    watcher?: FSWatcher
+    previousInstance?: ViteDevEnvironment
+  }): Promise<void> {
+    await super.init(options)
   }
 
-  const hot = webSocket ? createHotChannel(webSocket!) : false
+  async listen(server: ViteDevServer): Promise<void> {
+    const mf = new Miniflare(this.mfOptions)
+    this.mf = mf
 
-  const devEnv = new ViteDevEnvironment(name, config, {
-    hot,
-  }) as DevEnvironment
+    const resp = await mf.dispatchFetch('http:0.0.0.0/__init-module-runner', {
+      headers: {
+        upgrade: 'websocket',
+      },
+    })
+    if (!resp.ok) {
+      throw new Error('Error: failed to initialize the module runner!')
+    }
 
-  let entrypointSet = false
-  devEnv.api = {
-    // @ts-expect-error
-    async getHandler({ entrypoint }) {
-      if (!entrypointSet) {
-        const resp = await mf.dispatchFetch('http:0.0.0.0/__set-entrypoint', {
-          headers: [['x-vite-workerd-entrypoint', entrypoint]],
-        })
-        if (resp.ok) {
-          entrypointSet = resp.ok
-        } else {
-          throw new Error(
-            'failed to set entrypoint (the error should be logged in the terminal)',
-          )
-        }
-      }
+    const webSocket = resp.webSocket
 
+    if (!webSocket) {
+      console.error(
+        '\x1b[33m⚠️ failed to create a websocket for HMR (hmr disabled)\x1b[0m',
+      )
+    } else {
+      this.hot.setWebSocket(webSocket)
+    }
+
+    super.listen(server)
+  }
+
+  async close(): Promise<void> {
+    await this.mf?.dispose()
+    this.mf = undefined
+    await super.close()
+  }
+
+  api = {
+    getHandler: async ({
+      entrypoint,
+    }: {
+      entrypoint: string
+    }): Promise<(req: Request) => Response | Promise<Response>> => {
+      // @ts-expect-error
       return async (req: Request) => {
+        if (!this.entrypointSet) {
+          const resp = await this.mf!.dispatchFetch(
+            'http:0.0.0.0/__set-entrypoint',
+            {
+              headers: [['x-vite-workerd-entrypoint', entrypoint]],
+            },
+          )
+          if (resp.ok) {
+            this.entrypointSet = resp.ok
+          } else {
+            throw new Error(
+              'failed to set entrypoint (the error should be logged in the terminal)',
+            )
+          }
+        }
+
         // TODO: ideally we should pass the request itself with close to no tweaks needed... this needs to be investigated
-        return await mf.dispatchFetch(req.url, {
+        return await this.mf!.dispatchFetch(req.url, {
           method: req.method,
           // @ts-expect-error
           body: req.body,
@@ -188,28 +215,25 @@ async function createCloudflareDevEnvironment(
         })
       }
     },
-    async setEnvs(envs) {
-      await mf.dispatchFetch('http:0.0.0.0/__set-envs', {
+    setEnvs: async (envs: Record<string, Json>): Promise<void> => {
+      await this.mf!.dispatchFetch('http:0.0.0.0/__set-envs', {
         method: 'POST',
         body: JSON.stringify(envs),
       })
     },
-    async close() {
-      await mf.dispose()
-    },
   }
-
-  return devEnv
 }
 
-function createHotChannel(webSocket: WebSocket): HotChannel {
-  webSocket.accept()
-
+function createHotChannel(): HotChannel & {
+  setWebSocket: (ws: WebSocket) => void
+} {
+  let webSocket: WebSocket | undefined
   const listenersMap = new Map<string, Set<Function>>()
   let hotDispose: (() => void) | undefined
 
   return {
     send(...args: any[]) {
+      if (!webSocket) return
       let payload: HotPayload
 
       if (typeof args[0] === 'string') {
@@ -235,6 +259,8 @@ function createHotChannel(webSocket: WebSocket): HotChannel {
       listenersMap.get(event)?.delete(listener)
     },
     listen() {
+      if (!webSocket) return
+
       function eventListener(event: MessageEvent) {
         const payload = JSON.parse(event.data.toString())
 
@@ -247,15 +273,18 @@ function createHotChannel(webSocket: WebSocket): HotChannel {
         }
       }
 
+      webSocket.accept()
       webSocket.addEventListener('message', eventListener)
-
       hotDispose = () => {
-        webSocket.removeEventListener('message', eventListener)
+        webSocket?.removeEventListener('message', eventListener)
       }
     },
     close() {
       hotDispose?.()
       hotDispose = undefined
+    },
+    setWebSocket(ws) {
+      webSocket = ws
     },
   }
 }

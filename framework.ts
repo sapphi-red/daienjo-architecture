@@ -4,7 +4,7 @@ import {
   type Plugin,
   type ViteDevServer,
 } from 'vite'
-import type { DevEnvironment } from 'vite-env-workerd'
+import type { CloudflareDevEnvironment } from 'vite-env-workerd'
 import { serve, getRequestListener, type ServerType } from '@hono/node-server'
 import fs from 'node:fs/promises'
 import path from 'node:path'
@@ -107,7 +107,10 @@ export default function frameworkPlugin(options: Options): Plugin {
                 'dist/client',
                 options.clientEntry,
               ),
-              path.resolve(builder.config.root, 'dist/origin-server/index.html'),
+              path.resolve(
+                builder.config.root,
+                'dist/origin-server/index.html',
+              ),
             )
           },
         },
@@ -116,50 +119,60 @@ export default function frameworkPlugin(options: Options): Plugin {
     },
     async configureServer(server) {
       viteServer = server
-      const edge = server.environments[environmentNames.edge] as DevEnvironment
+      const edge = server.environments[
+        environmentNames.edge
+      ] as CloudflareDevEnvironment
 
       const ssrRunner = createServerModuleRunner(
         server.environments[environmentNames.ssr],
       )
 
-      if (originServer) {
-        await new Promise<void>((resolve, reject) => {
-          originServer!.close((err) => (err ? reject(err) : resolve()))
-        })
-      }
-      originServer = serve({
-        async fetch(request, env) {
-          const module = await ssrRunner.import(options.originServerEntry)
-          return module.default.fetch(request, env)
-        },
-        port: originServerPort,
-      })
-      if (!originServer.listening) {
-        await new Promise<void>((resolve) => {
-          originServer!.once('listening', resolve)
-        })
-      }
+      server.httpServer!.once('listening', () => {
+        if (originServer) throw new Error('origin server already listening')
 
-      await edge.api.setEnvs({
-        UPSTREAM_PROTOCOL: 'http:',
-        UPSTREAM_HOSTNAME: 'localhost',
-        UPSTREAM_PORT: '' + originServerPort,
+        originServer = serve({
+          async fetch(request, env) {
+            const module = await ssrRunner.import(options.originServerEntry)
+            return module.default.fetch(request, env)
+          },
+          port: originServerPort,
+        })
       })
+      server.httpServer!.once('close', () => {
+        originServer!.close()
+        originServer = undefined
+      })
+
+      let isEnvSet = false
 
       return async () => {
         const edgeHandler = getRequestListener(
           await edge.api.getHandler({ entrypoint: options.edgeServerEntry }),
         )
 
-        server.middlewares.use((req, res, next) => {
-          edgeHandler(req, res).then(
-            () => {
-              next()
-            },
-            (err) => {
-              next(err)
-            },
-          )
+        server.middlewares.use(async (req, res, next) => {
+          try {
+            if (!isEnvSet) {
+              await edge.api.setEnvs({
+                UPSTREAM_PROTOCOL: 'http:',
+                UPSTREAM_HOSTNAME: 'localhost',
+                UPSTREAM_PORT: '' + originServerPort,
+              })
+              isEnvSet = true
+            }
+
+            if (!originServer!.listening) {
+              await new Promise<void>((resolve) => {
+                originServer!.once('listening', resolve)
+              })
+            }
+
+            await edgeHandler(req, res)
+
+            next()
+          } catch (err) {
+            next(err)
+          }
         })
       }
     },
