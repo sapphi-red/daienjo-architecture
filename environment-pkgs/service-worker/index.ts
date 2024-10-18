@@ -8,7 +8,6 @@ import {
 import { ResolvedConfig, Plugin } from 'vite'
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import getRawBody from 'raw-body'
 import { fileURLToPath } from 'node:url'
 import WebSocket, { WebSocketServer } from 'ws'
 
@@ -130,19 +129,6 @@ self.addEventListener('fetch', (event) => {
           )
           return
         }
-        if (req.url === serviceWorkerRpcPath) {
-          const type = req.headers['x-vite-rpc-type']
-          if (type === 'fetchModule') {
-            const content = await getRawBody(req)
-            const args = JSON.parse(content.toString())
-            const result = await server.environments[
-              environmentName
-            ].fetchModule(...(args as [any, any]))
-            res.setHeader('content-type', 'application/javascript')
-            res.end(JSON.stringify(result))
-            return
-          }
-        }
         next()
       })
     },
@@ -220,7 +206,8 @@ async function createServiceWorkerDevEnvironment(
   hmrPort: number,
 ): Promise<DevEnvironment> {
   const devEnv = new DevEnvironment(name, config, {
-    hot: createHotChannel(hmrPort),
+    hot: true,
+    transport: createHotChannel(hmrPort),
   })
   return devEnv
 }
@@ -241,39 +228,17 @@ function createHotChannel(hmrPort: number): HotChannel {
           }
 
           const client = {
-            send: (...args: any[]) => {
-              let payload: HotPayload
-              if (typeof args[0] === 'string') {
-                payload = {
-                  type: 'custom',
-                  event: args[0],
-                  data: args[1],
-                }
-              } else {
-                payload = args[0]
-              }
+            send: (payload: HotPayload) => {
               socket.send(JSON.stringify(payload))
             },
           }
           for (const fn of listenersMap.get(payload.event)!) {
-            fn(payload.data, client)
+            fn(payload.data, client, payload.invoke)
           }
         })
       })
     },
-    send(...args: any[]) {
-      let payload: HotPayload
-
-      if (typeof args[0] === 'string') {
-        payload = {
-          type: 'custom',
-          event: args[0],
-          data: args[1],
-        }
-      } else {
-        payload = args[0]
-      }
-
+    send(payload: HotPayload) {
       wss?.clients.forEach((client) => {
         if (client.readyState === WebSocket.OPEN) {
           client.send(JSON.stringify(payload))

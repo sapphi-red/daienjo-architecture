@@ -6,6 +6,7 @@ import {
   type EnvironmentOptions,
   type FSWatcher,
   type ViteDevServer,
+  type CustomPayload,
 } from 'vite'
 import { HotChannel, HotPayload, ResolvedConfig, Plugin } from 'vite'
 import {
@@ -90,7 +91,7 @@ export class CloudflareDevEnvironment extends ViteDevEnvironment {
   private mfOptions: MiniflareOptions
   private entrypointSet = false
   private mf: Miniflare | undefined
-  public hot: HotChannel & {
+  public rawHot: HotChannel & {
     setWebSocket: (ws: WebSocket) => void
   }
 
@@ -116,14 +117,19 @@ export class CloudflareDevEnvironment extends ViteDevEnvironment {
         ROOT: config.root,
       },
       serviceBindings: {
-        __viteFetchModule: async (request) => {
-          const args = await request.json()
+        __viteInvokeModule: async (request) => {
+          const payload = (await request.json()) as CustomPayload
+          if (payload.type !== 'custom' || !payload.invoke) return
+          if (payload.event !== 'vite:fetchModule')
+            throw new Error(`invalid event: ${payload.event}`)
+
           try {
-            const result: any = await this.fetchModule(...(args as [any, any]))
-            return new MiniflareResponse(JSON.stringify(result))
+            const result: any = await this.fetchModule(
+              ...(payload.data as [any, any]),
+            )
+            return new MiniflareResponse(JSON.stringify({ r: result }))
           } catch (error) {
-            console.error('[fetchModule]', args, error)
-            throw error
+            return new MiniflareResponse(JSON.stringify({ e: error }))
           }
         },
       },
@@ -131,10 +137,10 @@ export class CloudflareDevEnvironment extends ViteDevEnvironment {
     }
 
     const hot = createHotChannel()
-    super(name, config, { hot })
+    super(name, config, { hot: true, transport: hot })
 
     this.mfOptions = mfOptions
-    this.hot = hot
+    this.rawHot = hot
   }
 
   async init(options?: {
@@ -164,7 +170,7 @@ export class CloudflareDevEnvironment extends ViteDevEnvironment {
         '\x1b[33m⚠️ failed to create a websocket for HMR (hmr disabled)\x1b[0m',
       )
     } else {
-      this.hot.setWebSocket(webSocket)
+      this.rawHot.setWebSocket(webSocket)
     }
 
     super.listen(server)
@@ -232,21 +238,8 @@ function createHotChannel(): HotChannel & {
   let hotDispose: (() => void) | undefined
 
   return {
-    send(...args: any[]) {
-      if (!webSocket) return
-      let payload: HotPayload
-
-      if (typeof args[0] === 'string') {
-        payload = {
-          type: 'custom',
-          event: args[0],
-          data: args[1],
-        }
-      } else {
-        payload = args[0]
-      }
-
-      webSocket.send(JSON.stringify(payload))
+    send(payload: HotPayload) {
+      webSocket?.send(JSON.stringify(payload))
     },
     on(event: any, listener: any) {
       if (!listenersMap.get(event)) {
@@ -268,8 +261,13 @@ function createHotChannel(): HotChannel & {
           listenersMap.set(payload.event, new Set())
         }
 
+        const client = {
+          send: (payload: HotPayload) => {
+            webSocket?.send(JSON.stringify(payload))
+          },
+        }
         for (const fn of listenersMap.get(payload.event)!) {
-          fn(payload.data)
+          fn(payload.data, client, payload.invoke)
         }
       }
 

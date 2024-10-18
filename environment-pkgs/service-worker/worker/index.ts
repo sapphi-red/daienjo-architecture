@@ -1,10 +1,14 @@
 declare const self: ServiceWorkerGlobalScope
 
 import type { HotPayload } from 'vite'
-import { ModuleRunner, ESModulesEvaluator } from 'vite/module-runner'
+import {
+  ModuleRunner,
+  ESModulesEvaluator,
+  createWebSocketModuleRunnerTransport,
+  type ModuleRunnerTransport,
+} from 'vite/module-runner'
 
 declare const ROOT: string
-declare const RPC_PATH: string
 declare const HMR_PORT: number
 declare const ENTRYPOINT: string
 
@@ -33,39 +37,28 @@ self.addEventListener('fetch', (event) => {
   handler?.(event)
 })
 
-let ws: WebSocket | undefined
+const transport = createWebSocketModuleRunnerTransport({
+  createConnection() {
+    return new WebSocket(`ws://localhost:${HMR_PORT}`)
+  },
+})
+const wrappedTransport: ModuleRunnerTransport = {
+  ...transport,
+  connect({ onMessage, onDisconnection }) {
+    const wrappedOnMessage = async (data: HotPayload) => {
+      if (data.type === 'full-reload') {
+        await setHandler()
+      }
+      onMessage(data)
+    }
+    return transport.connect({ onMessage: wrappedOnMessage, onDisconnection })
+  },
+}
+
 const moduleRunner = new ModuleRunner(
   {
     root: ROOT,
-    transport: {
-      fetchModule: async (...args) => {
-        const response = await fetch(RPC_PATH, {
-          method: 'POST',
-          headers: { 'x-vite-rpc-type': 'fetchModule' },
-          body: JSON.stringify(args),
-        })
-        const result = response.json()
-        return result as any
-      },
-    },
-    hmr: {
-      connection: {
-        isReady: () => !!ws && ws.readyState === WebSocket.OPEN,
-        onUpdate(callback) {
-          ws = new WebSocket(`ws://localhost:${HMR_PORT}`)
-          ws.addEventListener('message', async (event) => {
-            const payload: HotPayload = JSON.parse(event.data)
-            if (payload.type === 'full-reload') {
-              await setHandler()
-            }
-            callback(payload)
-          })
-        },
-        send(message) {
-          ws?.send(JSON.stringify(message))
-        },
-      },
-    },
+    transport: wrappedTransport,
   },
   new ESModulesEvaluator(),
 )

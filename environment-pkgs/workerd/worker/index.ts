@@ -1,21 +1,24 @@
 /// <reference types="@cloudflare/workers-types" />
 
-import type { Json } from 'miniflare'
-import { ModuleRunner } from 'vite/module-runner'
+import { WebSocket } from '@cloudflare/workers-types'
+import { Json } from 'miniflare'
+import {
+  createWebSocketModuleRunnerTransport,
+  ModuleRunner,
+} from 'vite/module-runner'
 
 type Env = {
   ROOT: string
   UNSAFE_EVAL: {
     eval: (code: string, filename?: string) => any
   }
-  __viteFetchModule: {
+  __viteInvokeModule: {
     fetch: (request: Request) => Promise<Response>
   }
 }
 
 let entrypoint: string | undefined
 let moduleRunner: ModuleRunner
-let hmrWebSocket: WebSocket
 let envs: Record<string, Json> = {}
 
 export default {
@@ -24,10 +27,7 @@ export default {
 
     if (url.pathname === '/__init-module-runner') {
       const pair = new WebSocketPair()
-
-      ;(pair[0] as any).accept()
-      hmrWebSocket = pair[0]
-      moduleRunner = await getModuleRunner(env)
+      moduleRunner = await getModuleRunner(env, pair[0] as unknown as WebSocket)
       return new Response(null, { status: 101, webSocket: pair[1] })
     }
 
@@ -52,7 +52,7 @@ export default {
 
     // here we filter out the extra bindings that we use for the environment
     // integration, so that user code doesn't get access to them
-    const { ROOT, UNSAFE_EVAL, __viteFetchModule, ...userEnv } = env
+    const { ROOT, UNSAFE_EVAL, __viteInvokeModule, ...userEnv } = env
     const mergedUserEnv = { ...userEnv, ...envs }
 
     let entrypointModule: any
@@ -70,35 +70,30 @@ export default {
 
 let _moduleRunner: ModuleRunner | undefined
 
-async function getModuleRunner(env: Env) {
+async function getModuleRunner(env: Env, ws: WebSocket) {
   if (_moduleRunner) return _moduleRunner
+
+  const transport = createWebSocketModuleRunnerTransport({
+    createConnection: () => {
+      ws.accept()
+      return ws as any
+    },
+  })
 
   _moduleRunner = new ModuleRunner(
     {
       root: env.ROOT,
       transport: {
-        fetchModule: async (...args) => {
-          const response = await env.__viteFetchModule.fetch(
+        ...transport,
+        async invoke(data) {
+          const response = await env.__viteInvokeModule.fetch(
             new Request('http://localhost', {
               method: 'POST',
-              body: JSON.stringify(args),
+              body: JSON.stringify(data),
             }),
           )
           const result = response.json()
-          return result as any
-        },
-      },
-      hmr: {
-        connection: {
-          isReady: () => true,
-          onUpdate(callback) {
-            hmrWebSocket.addEventListener('message', (event) => {
-              callback(JSON.parse(event.data))
-            })
-          },
-          send(message) {
-            hmrWebSocket.send(JSON.stringify(message))
-          },
+          return result as Promise<{ r: any } | { e: any }>
         },
       },
     },
