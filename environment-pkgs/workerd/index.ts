@@ -7,6 +7,7 @@ import {
   type FSWatcher,
   type ViteDevServer,
   type CustomPayload,
+  type HotChannelListener,
 } from 'vite'
 import { HotChannel, HotPayload, ResolvedConfig, Plugin } from 'vite'
 import {
@@ -100,6 +101,11 @@ export class CloudflareDevEnvironment extends ViteDevEnvironment {
     config: ResolvedConfig,
     options: CloudflareEnvironmentOptions,
   ) {
+    const hot = createHotChannel()
+    super(name, config, { hot: true, transport: hot })
+
+    const invokeHandlers = this.getInvokeHandlers()
+
     const { bindings: bindingsFromToml, ...optionsFromToml } =
       getOptionsFromWranglerConfig(options.config!)
 
@@ -119,25 +125,18 @@ export class CloudflareDevEnvironment extends ViteDevEnvironment {
       serviceBindings: {
         __viteInvokeModule: async (request) => {
           const payload = (await request.json()) as CustomPayload
-          if (payload.type !== 'custom' || !payload.invoke) return
-          if (payload.event !== 'vite:fetchModule')
-            throw new Error(`invalid event: ${payload.event}`)
+          if (payload.type !== 'custom') return
 
-          try {
-            const result: any = await this.fetchModule(
-              ...(payload.data as [any, any]),
-            )
-            return new MiniflareResponse(JSON.stringify({ r: result }))
-          } catch (error) {
-            return new MiniflareResponse(JSON.stringify({ e: error }))
+          for (const [event, handler] of Object.entries(invokeHandlers)) {
+            if (payload.event === event) {
+              const result = await handler(payload.data)
+              return new MiniflareResponse(JSON.stringify(result))
+            }
           }
         },
       },
       ...optionsFromToml,
     }
-
-    const hot = createHotChannel()
-    super(name, config, { hot: true, transport: hot })
 
     this.mfOptions = mfOptions
     this.rawHot = hot
@@ -234,21 +233,21 @@ function createHotChannel(): HotChannel & {
   setWebSocket: (ws: WebSocket) => void
 } {
   let webSocket: WebSocket | undefined
-  const listenersMap = new Map<string, Set<Function>>()
+  const listenersMap = new Map<string, Set<HotChannelListener>>()
   let hotDispose: (() => void) | undefined
 
   return {
-    send(payload: HotPayload) {
+    send(payload) {
       webSocket?.send(JSON.stringify(payload))
     },
-    on(event: any, listener: any) {
+    on(event: string, listener: HotChannelListener) {
       if (!listenersMap.get(event)) {
         listenersMap.set(event, new Set())
       }
 
       listenersMap.get(event)!.add(listener)
     },
-    off(event: any, listener: any) {
+    off(event: string, listener: HotChannelListener) {
       listenersMap.get(event)?.delete(listener)
     },
     listen() {

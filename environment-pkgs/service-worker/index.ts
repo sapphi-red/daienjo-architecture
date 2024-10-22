@@ -4,6 +4,7 @@ import {
   type EnvironmentOptions,
   type HotChannel,
   type HotPayload,
+  type HotChannelListener,
 } from 'vite'
 import { ResolvedConfig, Plugin } from 'vite'
 import fs from 'node:fs/promises'
@@ -214,7 +215,7 @@ async function createServiceWorkerDevEnvironment(
 
 function createHotChannel(hmrPort: number): HotChannel {
   let wss: WebSocketServer | undefined
-  const listenersMap = new Map<string, Set<Function>>()
+  const listenersMap = new Map<string, Set<HotChannelListener>>()
 
   return {
     listen: () => {
@@ -238,21 +239,21 @@ function createHotChannel(hmrPort: number): HotChannel {
         })
       })
     },
-    send(payload: HotPayload) {
+    send(payload) {
       wss?.clients.forEach((client) => {
         if (client.readyState === WebSocket.OPEN) {
           client.send(JSON.stringify(payload))
         }
       })
     },
-    on(event: any, listener: any) {
+    on(event: string, listener: HotChannelListener) {
       if (!listenersMap.get(event)) {
         listenersMap.set(event, new Set())
       }
 
       listenersMap.get(event)!.add(listener)
     },
-    off(event: any, listener: any) {
+    off(event: string, listener: HotChannelListener) {
       listenersMap.get(event)?.delete(listener)
     },
     close() {
