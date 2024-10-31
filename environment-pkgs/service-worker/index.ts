@@ -234,7 +234,7 @@ function createHotChannel(hmrPort: number): HotChannel {
             },
           }
           for (const fn of listenersMap.get(payload.event)!) {
-            fn(payload.data, client, payload.invoke)
+            fn(payload.data, client)
           }
         })
       })
