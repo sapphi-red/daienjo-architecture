@@ -172,7 +172,6 @@ export function createServiceWorkerEnvironment(
 ): EnvironmentOptions {
   return {
     consumer: 'server',
-    webCompatible: true,
     dev: {
       createEnvironment(name, config) {
         return createServiceWorkerDevEnvironment(name, config, hmrPort)

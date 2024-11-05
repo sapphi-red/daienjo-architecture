@@ -7,7 +7,6 @@ import {
   type FSWatcher,
   type ViteDevServer,
   type HotChannelListener,
-  type HotChannelInvokeHandler,
 } from 'vite'
 import { HotChannel, HotPayload, ResolvedConfig, Plugin } from 'vite'
 import {
@@ -16,9 +15,7 @@ import {
 } from 'wrangler'
 import {
   Miniflare,
-  Request as MiniflareRequest,
   Response as MiniflareResponse,
-  type Awaitable,
   type Json,
   type MessageEvent,
   type MiniflareOptions,
@@ -66,7 +63,6 @@ export function createCloudflareEnvironment(
 ): EnvironmentOptions {
   return {
     consumer: 'server',
-    webCompatible: true,
     dev: {
       createEnvironment(name, config) {
         return new CloudflareDevEnvironment(name, config, options)
@@ -123,7 +119,11 @@ export class CloudflareDevEnvironment extends ViteDevEnvironment {
         ROOT: config.root,
       },
       serviceBindings: {
-        __viteInvokeModule: hot.invokeModuleHandler,
+        __viteInvokeModule: async (request) => {
+          const payload = (await request.json()) as HotPayload
+          const result = await this.hot.handleInvoke(payload)
+          return new MiniflareResponse(JSON.stringify(result))
+        },
       },
       ...optionsFromToml,
     }
@@ -221,15 +221,10 @@ export class CloudflareDevEnvironment extends ViteDevEnvironment {
 
 function createHotChannel(): HotChannel & {
   setWebSocket: (ws: WebSocket) => void
-  invokeModuleHandler: (
-    request: MiniflareRequest,
-    mf: Miniflare,
-  ) => Awaitable<MiniflareResponse>
 } {
   let webSocket: WebSocket | undefined
   const listenersMap = new Map<string, Set<HotChannelListener>>()
   let hotDispose: (() => void) | undefined
-  let invokeHandler: HotChannelInvokeHandler | undefined
 
   return {
     send(payload) {
@@ -271,20 +266,12 @@ function createHotChannel(): HotChannel & {
         webSocket?.removeEventListener('message', eventListener)
       }
     },
-    setInvokeHandler(_invokeHandler) {
-      invokeHandler = _invokeHandler
-    },
     close() {
       hotDispose?.()
       hotDispose = undefined
     },
     setWebSocket(ws) {
       webSocket = ws
-    },
-    invokeModuleHandler: async (request) => {
-      const payload = (await request.json()) as HotPayload
-      const result = await invokeHandler!(payload)
-      return new MiniflareResponse(JSON.stringify(result))
     },
   }
 }
